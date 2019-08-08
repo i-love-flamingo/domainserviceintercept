@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"reflect"
 	"strings"
@@ -59,7 +58,7 @@ func Traceserver() {
 	}))
 }
 
-type t struct {
+type traceEntry struct {
 	c    string
 	t    time.Time
 	op   string
@@ -67,8 +66,10 @@ type t struct {
 	out  []interface{}
 }
 
-var traces []t
-var tracelock = new(sync.Mutex)
+var (
+	traces     []traceEntry
+	traceMutex = new(sync.Mutex)
+)
 
 func match(check string, args map[string]interface{}) bool {
 	t, err := template.New("").Parse(`{{if (` + check + `)}}ok{{end}}`)
@@ -103,23 +104,27 @@ func Traceme(ctx context.Context, op string, args map[string]interface{}, load f
 	}
 
 	mustload := true
-	for _, b := range fakedata {
+	for _, b := range patchconfig {
 		if b.What == op {
 			if match(b.Match, args) {
+				if b.Repeat > 0 && b.repeated >= b.Repeat {
+					continue
+				}
+				b.repeated++
+
 				if b.Return != nil {
 					mustload = false
 					x, _ := yaml.Marshal(b.Return)
 					o := out[0]
 					yaml.Unmarshal(x, o)
-					log.Println("replaced", b.Return)
 				} else if b.Patch != nil {
 					mustload = false
 					load()
 					x, _ := yaml.Marshal(b.Patch)
 					o := out[0]
 					yaml.Unmarshal(x, o)
-					log.Println("patched", b.Patch)
 				}
+				break
 			}
 		}
 	}
@@ -128,30 +133,32 @@ func Traceme(ctx context.Context, op string, args map[string]interface{}, load f
 		load()
 	}
 
-	tracelock.Lock()
-	traces = append([]t{{
+	traceMutex.Lock()
+	traces = append([]traceEntry{{
 		c:    id,
 		t:    time.Now(),
 		op:   op,
 		args: args,
 		out:  out,
 	}}, traces...)
-	tracelock.Unlock()
+	traceMutex.Unlock()
 }
 
-type bla struct {
+type patch struct {
 	What  string
 	Match string
 	//In     string
-	Return interface{}
-	Patch  interface{}
+	Return   interface{}
+	Patch    interface{}
+	Repeat   int
+	repeated int
 }
 
-var fakedata []bla
+var patchconfig []*patch
 
 func loadYaml() {
 	b, _ := ioutil.ReadFile("config/patch.yaml")
-	yaml.Unmarshal(b, &fakedata)
+	yaml.Unmarshal(b, &patchconfig)
 }
 func init() {
 	loadYaml()
