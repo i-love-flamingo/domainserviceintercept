@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"reflect"
 	"strings"
@@ -24,7 +25,7 @@ func preresponse(writer http.ResponseWriter) {
 
 // Traceserver serves data/traces
 func Traceserver() {
-	http.ListenAndServe(":13211", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	log.Print(http.ListenAndServe(":13211", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		defer request.Body.Close()
 
 		switch {
@@ -69,9 +70,39 @@ func Traceserver() {
 </script>
 `)
 			return
+
+		case request.URL.Query().Get("dump") != "":
+			preresponse(writer)
+			fmt.Fprint(writer, "<pre>")
+			var bla []patch
+			for _, t := range traces {
+				if t.c != request.URL.Query().Get("dump") && request.URL.Query().Get("dump") != "all" {
+					continue
+				}
+				match := []string{"1"}
+				for k, v := range t.args {
+					for reflect.ValueOf(v).Kind() == reflect.Ptr {
+						v = reflect.ValueOf(v).Elem().Interface()
+					}
+					if reflect.ValueOf(v).Kind() == reflect.Struct {
+						continue
+					}
+					match = append(match, fmt.Sprintf("eq .%s %v", k, v))
+				}
+				bla = append(bla, patch{
+					What:   t.op,
+					Match:  "and (" + strings.Join(match, ") (") + ")",
+					Return: t.out[0],
+					Repeat: 1,
+				})
+			}
+			b, _ := yaml.Marshal(bla)
+			fmt.Fprint(writer, string(b))
+			return
 		}
 
 		preresponse(writer)
+		fmt.Fprintf(writer, `<a href="?dump=all">Dump all as yaml</a> | <a href="?dump=%s">Dump as yaml</a><br/>`, request.URL.Query().Get("expand"))
 		fmt.Fprint(writer, "<pre>")
 
 		pt := ""
@@ -97,7 +128,7 @@ func Traceserver() {
 			}
 			pt = t.c
 		}
-	}))
+	})))
 }
 
 type traceEntry struct {
@@ -195,8 +226,8 @@ type patch struct {
 	What  string
 	Match string
 	//In     string
-	Return   interface{}
-	Patch    interface{}
+	Return   interface{} `yaml:",omitempty"`
+	Patch    interface{} `yaml:",omitempty"`
 	Repeat   int
 	repeated int
 }
