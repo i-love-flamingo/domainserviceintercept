@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -17,54 +18,49 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-var vars = new(sync.Map)
+var statevars = new(sync.Map)
 
 func Vars() *sync.Map {
-	return vars
+	return statevars
 }
 
 func preresponse(writer http.ResponseWriter) {
 	writer.Header().Set("content-type", "text/html; charset=utf-8")
 	fmt.Fprint(writer, "<html><body>")
-	fmt.Fprint(writer, "<a href=\"/\">List All</a> | <a href=\"/?clear=1\">Clear All</a> | <a href=\"/?reload=1\">Reload patch.yaml</a> | <a href=\"/?setconfig=1\">Config</a> | <a href=\"/?vars=1\">Vars</a><br/>")
+	fmt.Fprint(writer, `
+DomainServiceIntercept
+| <a href="/">List All</a>
+| <a href="/?clear=1">Clear All</a>
+| <a href="/?setconfig=1">Config</a>
+| <a href="/?vars=1">Vars</a>
+| <a href="/?scenarios=show">Scenarios</a>
+<br/>`)
 }
 
-// Traceserver serves data/traces
-func Traceserver() {
-	log.Print(http.ListenAndServe(":13211", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		defer request.Body.Close()
+func clear(w http.ResponseWriter, r *http.Request) {
+	traceMutex.Lock()
+	traces = nil
+	traceMutex.Unlock()
+	loadYaml([]byte(`[]`))
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
 
-		switch {
-		case request.URL.Query().Get("clear") == "1":
-			traceMutex.Lock()
-			traces = nil
-			traceMutex.Unlock()
-			http.Redirect(writer, request, "/", http.StatusTemporaryRedirect)
-			return
+func setconfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		loadYaml([]byte(r.FormValue("config")))
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
 
-		case request.URL.Query().Get("reload") == "1":
-			loadYaml()
-			vars = new(sync.Map)
-			http.Redirect(writer, request, "/", http.StatusTemporaryRedirect)
-			return
-
-		case request.URL.Query().Get("setconfig") == "1":
-			if request.Method == http.MethodPost {
-				vars = new(sync.Map)
-				yaml.Unmarshal([]byte(request.FormValue("config")), &patchconfig)
-				http.Redirect(writer, request, "/", http.StatusTemporaryRedirect)
-				return
-			}
-
-			preresponse(writer)
-			b, _ := yaml.Marshal(patchconfig)
-			fmt.Fprintf(writer, `
+	preresponse(w)
+	b, _ := yaml.Marshal(patchconfig)
+	fmt.Fprintf(w, `
 <form action="?setconfig=1" method="post">
 <button type="submit">Set config</button><br/>
 <textarea name="config" style="visibility: hidden;" id="configta">%s</textarea>
 </form>
 <div id="config" style="height: 600px; width: 1000px; position: absolute;">%s</div>`, string(b), string(b))
-			fmt.Fprintf(writer, `
+	fmt.Fprintf(w, `
 <script src="https://pagecdn.io/lib/ace/1.4.5/ace.js" type="text/javascript" charset="utf-8"></script>
 <script>
     var editor = ace.edit("config");
@@ -77,59 +73,101 @@ func Traceserver() {
 	});
 </script>
 `)
-			return
+}
 
-		case request.URL.Query().Get("vars") == "1":
-			preresponse(writer)
-			fmt.Fprint(writer, "<pre>")
-			vars.Range(func(key, value interface{}) bool {
-				fmt.Fprintf(writer, "%q: %#v\n", key, value)
-				return true
-			})
-			return
+func vars(w http.ResponseWriter, r *http.Request) {
+	preresponse(w)
+	fmt.Fprint(w, "<pre>")
+	statevars.Range(func(key, value interface{}) bool {
+		fmt.Fprintf(w, "%q: %#v\n", key, value)
+		return true
+	})
+}
 
-		case request.URL.Query().Get("dump") != "":
-			preresponse(writer)
-			fmt.Fprint(writer, "<pre>")
-			var bla []patch
-			for _, t := range traces {
-				if t.c != request.URL.Query().Get("dump") && request.URL.Query().Get("dump") != "all" {
-					continue
-				}
-				match := []string{"1"}
-				for k, v := range t.args {
-					for reflect.ValueOf(v).Kind() == reflect.Ptr {
-						v = reflect.ValueOf(v).Elem().Interface()
-					}
-					if reflect.ValueOf(v).Kind() == reflect.Struct {
-						continue
-					}
-					match = append(match, fmt.Sprintf("eq .%s %v", k, v))
-				}
-				bla = append(bla, patch{
-					What:   t.op,
-					Match:  "and (" + strings.Join(match, ") (") + ")",
-					Return: t.out[0],
-					Repeat: 1,
-				})
+func dump(w http.ResponseWriter, r *http.Request) {
+	preresponse(w)
+	fmt.Fprint(w, "<pre>")
+	var bla []patch
+	for _, t := range traces {
+		if t.c != r.URL.Query().Get("dump") && r.URL.Query().Get("dump") != "all" {
+			continue
+		}
+		match := []string{"1"}
+		for k, v := range t.args {
+			for reflect.ValueOf(v).Kind() == reflect.Ptr {
+				v = reflect.ValueOf(v).Elem().Interface()
 			}
-			b, _ := yaml.Marshal(bla)
-			fmt.Fprint(writer, string(b))
+			if reflect.ValueOf(v).Kind() == reflect.Struct {
+				continue
+			}
+			match = append(match, fmt.Sprintf("eq .%s %v", k, v))
+		}
+		bla = append(bla, patch{
+			What:   t.op,
+			Match:  "and (" + strings.Join(match, ") (") + ")",
+			Return: t.out[0],
+			Repeat: 1,
+		})
+	}
+	b, _ := yaml.Marshal(bla)
+	fmt.Fprint(w, string(b))
+}
+
+func scenarios(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("scenarios") == "show" {
+		files, _ := ioutil.ReadDir("dsi")
+		preresponse(w)
+		for _, file := range files {
+			fmt.Fprintf(w, `<a href="?scenarios=%s">%s</a><br/>`, file.Name(), file.Name())
+		}
+		return
+	}
+
+	filename := filepath.Clean("/" + r.URL.Query().Get("scenarios"))
+	loadFile("dsi" + filename)
+
+	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+}
+
+// Traceserver serves data/traces
+func Traceserver() {
+	log.Print(http.ListenAndServe(":13211", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		switch {
+		case r.URL.Query().Get("clear") == "1":
+			clear(w, r)
+			return
+
+		case r.URL.Query().Get("setconfig") == "1":
+			setconfig(w, r)
+			return
+
+		case r.URL.Query().Get("vars") == "1":
+			vars(w, r)
+			return
+
+		case r.URL.Query().Get("dump") != "":
+			dump(w, r)
+			return
+
+		case r.URL.Query().Get("scenarios") != "":
+			scenarios(w, r)
 			return
 		}
 
-		preresponse(writer)
-		fmt.Fprintf(writer, `<a href="?dump=all">Dump all as yaml</a> | <a href="?dump=%s">Dump as yaml</a><br/>`, request.URL.Query().Get("expand"))
-		fmt.Fprint(writer, "<pre>")
+		preresponse(w)
+		fmt.Fprintf(w, `<a href="?dump=all">Dump all as yaml</a> | <a href="?dump=%s">Dump as yaml</a><br/>`, r.URL.Query().Get("expand"))
+		fmt.Fprint(w, "<pre>")
 
 		pt := ""
 		for _, t := range traces {
-			if request.URL.Query().Get("expand") != "" && request.URL.Query().Get("expand") != t.c {
+			if r.URL.Query().Get("expand") != "" && r.URL.Query().Get("expand") != t.c {
 				continue
 			}
 
 			if pt != "" && pt != t.c {
-				fmt.Fprint(writer, "\n")
+				fmt.Fprint(w, "\n")
 			}
 			var args []string
 			for k, v := range t.args {
@@ -138,10 +176,10 @@ func Traceserver() {
 				}
 				args = append(args, k+"="+fmt.Sprintf("%#v", v))
 			}
-			fmt.Fprintf(writer, "<a href=\"?expand=%s\">%s</a> @ %s: %s(%v)\n", t.c, t.c, t.t.Format("15:04:05.000000000"), t.op, strings.Join(args, ", "))
-			if request.URL.Query().Get("expand") != "" {
+			fmt.Fprintf(w, "<a href=\"?expand=%s\">%s</a> @ %s: %s%s(%v)\n", t.c, t.c, t.t.Format("15:04:05.000000000"), strings.Repeat("| ", t.depth), t.op, strings.Join(args, ", "))
+			if r.URL.Query().Get("expand") != "" {
 				b, _ := yaml.Marshal(t.out)
-				fmt.Fprintf(writer, "%s\n", string(b))
+				fmt.Fprintf(w, "%s\n", string(b))
 			}
 			pt = t.c
 		}
@@ -149,11 +187,12 @@ func Traceserver() {
 }
 
 type traceEntry struct {
-	c    string
-	t    time.Time
-	op   string
-	args map[string]interface{}
-	out  []interface{}
+	c     string
+	t     time.Time
+	op    string
+	args  map[string]interface{}
+	out   []interface{}
+	depth int
 }
 
 var (
@@ -170,7 +209,7 @@ func match(check string, args map[string]interface{}) bool {
 	t := template.New("")
 	t.Funcs(template.FuncMap{
 		"get": func(key interface{}) interface{} {
-			v, _ := vars.Load(key)
+			v, _ := statevars.Load(key)
 			return v
 		},
 	})
@@ -198,12 +237,16 @@ func match(check string, args map[string]interface{}) bool {
 	return res.String() == "ok"
 }
 
+var depth = 0
+
 // Traceme collects available data
 func Traceme(ctx context.Context, op string, args map[string]interface{}, load func(), out ...interface{}) {
 	id := "0000000000000000"
 	if span := trace.FromContext(ctx); span != nil {
 		id = span.SpanContext().TraceID.String()
 	}
+
+	depth++
 
 	mustload := true
 	for _, b := range patchconfig {
@@ -227,7 +270,7 @@ func Traceme(ctx context.Context, op string, args map[string]interface{}, load f
 					yaml.Unmarshal(x, o)
 				}
 				for k, v := range b.Set {
-					vars.Store(k, v)
+					statevars.Store(k, v)
 				}
 				if !b.Continue {
 					break
@@ -240,13 +283,16 @@ func Traceme(ctx context.Context, op string, args map[string]interface{}, load f
 		load()
 	}
 
+	depth--
+
 	traceMutex.Lock()
 	traces = append([]traceEntry{{
-		c:    id,
-		t:    time.Now(),
-		op:   op,
-		args: args,
-		out:  out,
+		c:     id,
+		t:     time.Now(),
+		op:    op,
+		args:  args,
+		out:   out,
+		depth: depth,
 	}}, traces...)
 	traceMutex.Unlock()
 }
@@ -265,10 +311,12 @@ type patch struct {
 
 var patchconfig []*patch
 
-func loadYaml() {
-	b, _ := ioutil.ReadFile("config/patch.yaml")
-	yaml.Unmarshal(b, &patchconfig)
+func loadFile(filename string) {
+	b, _ := ioutil.ReadFile(filename)
+	loadYaml(b)
 }
-func init() {
-	loadYaml()
+
+func loadYaml(b []byte) {
+	yaml.Unmarshal(b, &patchconfig)
+	statevars = new(sync.Map)
 }
