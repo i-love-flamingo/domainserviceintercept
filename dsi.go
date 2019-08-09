@@ -16,18 +16,62 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+func preresponse(writer http.ResponseWriter) {
+	writer.Header().Set("content-type", "text/html; charset=utf-8")
+	fmt.Fprint(writer, "<html><body>")
+	fmt.Fprint(writer, "<a href=\"/\">List All</a> | <a href=\"/?clear=1\">Clear All</a> | <a href=\"/?reload=1\">Reload patch.yaml</a> | <a href=\"/?setconfig=1\">Config</a><br/>")
+}
+
 // Traceserver serves data/traces
 func Traceserver() {
 	http.ListenAndServe(":13211", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		writer.Header().Set("content-type", "text/html; charset=utf-8")
+		defer request.Body.Close()
 
-		fmt.Fprint(writer, "<html><body>")
-		if request.URL.Query().Get("expand") != "" {
-			fmt.Fprint(writer, "<a href=\"?\">List All</a><br/>")
-		} else {
-			//fmt.Fprint(writer, "<a href=\"?expand=1\">Expand</a><br/>")
+		switch {
+		case request.URL.Query().Get("clear") == "1":
+			traceMutex.Lock()
+			traces = nil
+			traceMutex.Unlock()
+			http.Redirect(writer, request, "/", http.StatusTemporaryRedirect)
+			return
+
+		case request.URL.Query().Get("reload") == "1":
+			loadYaml()
+			http.Redirect(writer, request, "/", http.StatusTemporaryRedirect)
+			return
+
+		case request.URL.Query().Get("setconfig") == "1":
+			if request.Method == http.MethodPost {
+				yaml.Unmarshal([]byte(request.FormValue("config")), &patchconfig)
+				http.Redirect(writer, request, "/", http.StatusTemporaryRedirect)
+				return
+			}
+
+			preresponse(writer)
+			b, _ := yaml.Marshal(patchconfig)
+			fmt.Fprintf(writer, `
+<form action="?setconfig=1" method="post">
+<button type="submit">Set config</button><br/>
+<textarea name="config" style="visibility: hidden;" id="configta">%s</textarea>
+</form>
+<div id="config" style="height: 600px; width: 1000px; position: absolute;">%s</div>`, string(b), string(b))
+			fmt.Fprintf(writer, `
+<script src="https://pagecdn.io/lib/ace/1.4.5/ace.js" type="text/javascript" charset="utf-8"></script>
+<script>
+    var editor = ace.edit("config");
+    editor.setTheme("ace/theme/monokai");
+    editor.session.setMode("ace/mode/yaml");
+	var textarea = document.getElementById("configta");
+	editor.getSession().setValue(textarea.value);
+	editor.getSession().on('change', function(){
+	 textarea.value = editor.getSession().getValue();
+	});
+</script>
+`)
+			return
 		}
 
+		preresponse(writer)
 		fmt.Fprint(writer, "<pre>")
 
 		pt := ""
@@ -53,8 +97,6 @@ func Traceserver() {
 			}
 			pt = t.c
 		}
-
-		loadYaml()
 	}))
 }
 
@@ -72,6 +114,11 @@ var (
 )
 
 func match(check string, args map[string]interface{}) bool {
+	// empty matcher
+	if check == "" {
+		return true
+	}
+
 	t, err := template.New("").Parse(`{{if (` + check + `)}}ok{{end}}`)
 	if err != nil {
 		panic(err)
