@@ -229,7 +229,9 @@ func Traceme(ctx context.Context, op string, args map[string]interface{}, load f
 				for k, v := range b.Set {
 					vars.Store(k, v)
 				}
-				break
+				if !b.Continue {
+					break
+				}
 			}
 		}
 	}
@@ -258,6 +260,7 @@ type patch struct {
 	Repeat   int
 	repeated int
 	Set      map[string]interface{}
+	Continue bool `yaml:",omitempty"`
 }
 
 var patchconfig []*patch
