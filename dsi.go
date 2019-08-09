@@ -17,10 +17,16 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+var vars = new(sync.Map)
+
+func Vars() *sync.Map {
+	return vars
+}
+
 func preresponse(writer http.ResponseWriter) {
 	writer.Header().Set("content-type", "text/html; charset=utf-8")
 	fmt.Fprint(writer, "<html><body>")
-	fmt.Fprint(writer, "<a href=\"/\">List All</a> | <a href=\"/?clear=1\">Clear All</a> | <a href=\"/?reload=1\">Reload patch.yaml</a> | <a href=\"/?setconfig=1\">Config</a><br/>")
+	fmt.Fprint(writer, "<a href=\"/\">List All</a> | <a href=\"/?clear=1\">Clear All</a> | <a href=\"/?reload=1\">Reload patch.yaml</a> | <a href=\"/?setconfig=1\">Config</a> | <a href=\"/?vars=1\">Vars</a><br/>")
 }
 
 // Traceserver serves data/traces
@@ -38,11 +44,13 @@ func Traceserver() {
 
 		case request.URL.Query().Get("reload") == "1":
 			loadYaml()
+			vars = new(sync.Map)
 			http.Redirect(writer, request, "/", http.StatusTemporaryRedirect)
 			return
 
 		case request.URL.Query().Get("setconfig") == "1":
 			if request.Method == http.MethodPost {
+				vars = new(sync.Map)
 				yaml.Unmarshal([]byte(request.FormValue("config")), &patchconfig)
 				http.Redirect(writer, request, "/", http.StatusTemporaryRedirect)
 				return
@@ -69,6 +77,15 @@ func Traceserver() {
 	});
 </script>
 `)
+			return
+
+		case request.URL.Query().Get("vars") == "1":
+			preresponse(writer)
+			fmt.Fprint(writer, "<pre>")
+			vars.Range(func(key, value interface{}) bool {
+				fmt.Fprintf(writer, "%q: %#v\n", key, value)
+				return true
+			})
 			return
 
 		case request.URL.Query().Get("dump") != "":
@@ -150,7 +167,14 @@ func match(check string, args map[string]interface{}) bool {
 		return true
 	}
 
-	t, err := template.New("").Parse(`{{if (` + check + `)}}ok{{end}}`)
+	t := template.New("")
+	t.Funcs(template.FuncMap{
+		"get": func(key interface{}) interface{} {
+			v, _ := vars.Load(key)
+			return v
+		},
+	})
+	t, err := t.Parse(`{{if (` + check + `)}}ok{{end}}`)
 	if err != nil {
 		panic(err)
 	}
@@ -202,6 +226,9 @@ func Traceme(ctx context.Context, op string, args map[string]interface{}, load f
 					o := out[0]
 					yaml.Unmarshal(x, o)
 				}
+				for k, v := range b.Set {
+					vars.Store(k, v)
+				}
 				break
 			}
 		}
@@ -230,6 +257,7 @@ type patch struct {
 	Patch    interface{} `yaml:",omitempty"`
 	Repeat   int
 	repeated int
+	Set      map[string]interface{}
 }
 
 var patchconfig []*patch
