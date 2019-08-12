@@ -3,6 +3,7 @@ package dsi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -76,6 +77,16 @@ func setconfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func vars(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("json") == "1" {
+		w.Header().Set("Content-Type", "application/json")
+		v := make(map[string]interface{})
+		statevars.Range(func(key, value interface{}) bool {
+			v[fmt.Sprintf("%v", key)] = value
+			return true
+		})
+		log.Println(json.NewEncoder(w).Encode(v))
+		return
+	}
 	preresponse(w)
 	fmt.Fprint(w, "<pre>")
 	statevars.Range(func(key, value interface{}) bool {
@@ -105,7 +116,7 @@ func dump(w http.ResponseWriter, r *http.Request) {
 		bla = append(bla, patch{
 			What:   t.op,
 			Match:  "and (" + strings.Join(match, ") (") + ")",
-			Return: t.out[0],
+			Return: t.out,
 			Repeat: 1,
 		})
 	}
@@ -190,8 +201,8 @@ type traceEntry struct {
 	c     string
 	t     time.Time
 	op    string
-	args  map[string]interface{}
-	out   []interface{}
+	args  A
+	out   A
 	depth int
 }
 
@@ -239,8 +250,10 @@ func match(check string, args map[string]interface{}) bool {
 
 var depth = 0
 
+type A map[string]interface{}
+
 // Traceme collects available data
-func Traceme(ctx context.Context, op string, args map[string]interface{}, load func(), out ...interface{}) {
+func Traceme(ctx context.Context, op string, args A, load func(), out A, vars A) {
 	id := "0000000000000000"
 	if span := trace.FromContext(ctx); span != nil {
 		id = span.SpanContext().TraceID.String()
@@ -257,18 +270,23 @@ func Traceme(ctx context.Context, op string, args map[string]interface{}, load f
 				}
 				b.repeated++
 
-				if b.Return != nil {
-					mustload = false
-					x, _ := yaml.Marshal(b.Return)
-					o := out[0]
-					yaml.Unmarshal(x, o)
-				} else if b.Patch != nil {
-					mustload = false
-					load()
-					x, _ := yaml.Marshal(b.Patch)
-					o := out[0]
-					yaml.Unmarshal(x, o)
+				for outName := range out {
+					if ret, ok := b.Return[outName]; ok {
+						mustload = false
+						if s, ok := ret.(string); ok && vars[s] != nil {
+							reflect.ValueOf(out[outName]).Elem().Set(reflect.ValueOf(vars[s]))
+						} else {
+							x, _ := yaml.Marshal(ret)
+							yaml.Unmarshal(x, out[outName])
+						}
+					} else if patch, ok := b.Patch[outName]; ok {
+						mustload = false
+						load()
+						x, _ := yaml.Marshal(patch)
+						yaml.Unmarshal(x, out[outName])
+					}
 				}
+
 				for k, v := range b.Set {
 					statevars.Store(k, v)
 				}
@@ -301,12 +319,12 @@ type patch struct {
 	What  string
 	Match string
 	//In     string
-	Return   interface{} `yaml:",omitempty"`
-	Patch    interface{} `yaml:",omitempty"`
+	Return   map[string]interface{} `yaml:",omitempty"`
+	Patch    map[string]interface{} `yaml:",omitempty"`
 	Repeat   int
 	repeated int
-	Set      map[string]interface{}
-	Continue bool `yaml:",omitempty"`
+	Set      map[string]interface{} `yaml:",omitempty"`
+	Continue bool                   `yaml:",omitempty"`
 }
 
 var patchconfig []*patch
