@@ -25,7 +25,15 @@ type sInterceptor struct {
 }
 
 func (i *sInterceptor) IsDuplicate(ctx context.Context, request *web.Request, order domain.Order) (duplicated bool, err error) {
-	dsi.Traceme(ctx, "IsDuplicate", map[string]interface{}{"request": request}, func() { duplicated, err = i.Service.IsDuplicate(ctx, request, order) }, &duplicated, &err)
+	dsi.Traceme(ctx, "IsDuplicate", dsi.A{"request": request}, func() { duplicated, err = i.Service.IsDuplicate(ctx, request, order) }, dsi.A{"duplicated": &duplicated, "err": &err}, nil)
 	return
 }
+```
+
+Example config:
+```yaml
+- what: IsDuplicate
+  return:
+    duplicated: true
+  repeat: 2
 ```
