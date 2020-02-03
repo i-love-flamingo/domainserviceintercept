@@ -64,13 +64,13 @@ func setconfig(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `
 <script src="https://pagecdn.io/lib/ace/1.4.5/ace.js" type="text/javascript" charset="utf-8"></script>
 <script>
-    var editor = ace.edit("config");
-    editor.setTheme("ace/theme/monokai");
-    editor.session.setMode("ace/mode/yaml");
+	var editor = ace.edit("config");
+	editor.setTheme("ace/theme/monokai");
+	editor.session.setMode("ace/mode/yaml");
 	var textarea = document.getElementById("configta");
 	editor.getSession().setValue(textarea.value);
-	editor.getSession().on('change', function(){
-	 textarea.value = editor.getSession().getValue();
+	editor.getSession().on('change', function() {
+		textarea.value = editor.getSession().getValue();
 	});
 </script>
 `)
@@ -129,8 +129,22 @@ func scenarios(w http.ResponseWriter, r *http.Request) {
 		files, _ := ioutil.ReadDir("dsi")
 		preresponse(w)
 		for _, file := range files {
-			fmt.Fprintf(w, `<a href="?scenarios=%s">%s</a><br/>`, file.Name(), file.Name())
+			fmt.Fprintf(w, `<hr/><a href="?scenarios=%s">%s</a><br/>`, file.Name(), file.Name())
+			content, _ := ioutil.ReadFile(filepath.Clean("dsi/" + file.Name()))
+			fmt.Fprintf(w, `<div style="border: solid 1px #666;"><div class="preview" style="height: 150px; width: 1000px; font-size: 8pt;">%s</div></div>`, strings.TrimSpace(string(content)))
 		}
+		fmt.Fprintf(w, `
+<script src="https://pagecdn.io/lib/ace/1.4.5/ace.js" type="text/javascript" charset="utf-8"></script>
+<script>
+	for (el of document.getElementsByClassName("preview")) {
+		var editor = ace.edit(el);
+		editor.session.setMode("ace/mode/yaml");
+		editor.setOptions({
+			maxLines: 10
+		})
+	}
+</script>
+`)
 		return
 	}
 
