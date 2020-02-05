@@ -266,8 +266,12 @@ var depth = 0
 
 type A map[string]interface{}
 
+var lastctx = context.Background()
+
 // Traceme collects available data
 func Traceme(ctx context.Context, op string, args A, load func(), out A, vars A) {
+	lastctx = ctx
+
 	id := "0000000000000000"
 	if span := trace.FromContext(ctx); span != nil {
 		id = span.SpanContext().TraceID.String()
