@@ -27,7 +27,34 @@ func Vars() *sync.Map {
 
 func preresponse(writer http.ResponseWriter) {
 	writer.Header().Set("content-type", "text/html; charset=utf-8")
-	fmt.Fprint(writer, "<html><body>")
+	fmt.Fprint(writer, `<!doctype html>
+<html>
+<head>
+<style>
+body {
+	color: #f8f8f2;
+	background: #272822;
+	width: 100%;
+}
+a {
+	color: #f8f8f2;
+}
+a:visited {
+	color: #f8f8f2;
+}
+a:hover {
+	text-decoration: none;
+}
+
+.log-Debug {color: #b267e6}
+.log-Info {color: #6796e6}
+.log-Warn {color: #cd9731}
+.log-Error {color: #f44747}
+.log-Fatal {color: #f44747}
+.log-Panic {color: #f44747}
+</style>
+</head>
+<body>`)
 	fmt.Fprint(writer, `
 DomainServiceIntercept
 | <a href="/">List All</a>
@@ -103,6 +130,9 @@ func dump(w http.ResponseWriter, r *http.Request) {
 		if t.c != r.URL.Query().Get("dump") && r.URL.Query().Get("dump") != "all" {
 			continue
 		}
+		if t.logLevel != "" {
+			continue
+		}
 		match := []string{"1"}
 		for k, v := range t.args {
 			for reflect.ValueOf(v).Kind() == reflect.Ptr {
@@ -139,8 +169,10 @@ func scenarios(w http.ResponseWriter, r *http.Request) {
 	for (el of document.getElementsByClassName("preview")) {
 		var editor = ace.edit(el);
 		editor.session.setMode("ace/mode/yaml");
+		editor.setTheme("ace/theme/monokai");
 		editor.setOptions({
-			maxLines: 10
+			maxLines: 10,
+			readOnly: true
 		})
 	}
 </script>
@@ -194,17 +226,25 @@ func Traceserver() {
 			if pt != "" && pt != t.c {
 				fmt.Fprint(w, "\n")
 			}
-			var args []string
-			for k, v := range t.args {
-				for reflect.ValueOf(v).Kind() == reflect.Ptr {
-					v = reflect.ValueOf(v).Elem().Interface()
+
+			if t.logLevel != "" {
+				fmt.Fprintf(w, `<span class="log-%s">%s: %s @ %s</span><br/>`, t.logLevel, t.t.Format("15:04:05.000000000"), t.logLevel, t.logMsg)
+			} else {
+				var args []string
+				for k, v := range t.args {
+					for reflect.ValueOf(v).Kind() == reflect.Ptr {
+						v = reflect.ValueOf(v).Elem().Interface()
+					}
+					args = append(args, k+"="+fmt.Sprintf("%#v", v))
 				}
-				args = append(args, k+"="+fmt.Sprintf("%#v", v))
-			}
-			fmt.Fprintf(w, "<a href=\"?expand=%s\">%s</a> @ %s: %s%s(%v)\n", t.c, t.c, t.t.Format("15:04:05.000000000"), strings.Repeat("| ", t.depth), t.op, strings.Join(args, ", "))
-			if r.URL.Query().Get("expand") != "" {
-				b, _ := yaml.Marshal(t.out)
-				fmt.Fprintf(w, "%s\n", string(b))
+				fmt.Fprintf(w, "%s: <a href=\"?expand=%s\">%s</a> @ %s%s(%v)", t.t.Format("15:04:05.000000000"), t.c, t.c, strings.Repeat("| ", t.depth), t.op, strings.Join(args, ", "))
+				if r.URL.Query().Get("expand") != "" {
+					b, _ := yaml.Marshal(t.out)
+					fmt.Fprintf(w, "\n%s\n", string(b))
+				} else {
+					b, _ := json.Marshal(t.out)
+					fmt.Fprintf(w, " = %s\n", string(b))
+				}
 			}
 			pt = t.c
 		}
@@ -212,12 +252,14 @@ func Traceserver() {
 }
 
 type traceEntry struct {
-	c     string
-	t     time.Time
-	op    string
-	args  A
-	out   A
-	depth int
+	c        string
+	t        time.Time
+	op       string
+	args     A
+	out      A
+	depth    int
+	logLevel string
+	logMsg   string
 }
 
 var (
@@ -266,8 +308,12 @@ var depth = 0
 
 type A map[string]interface{}
 
+var lastctx = context.Background()
+
 // Traceme collects available data
 func Traceme(ctx context.Context, op string, args A, load func(), out A, vars A) {
+	lastctx = ctx
+
 	id := "0000000000000000"
 	if span := trace.FromContext(ctx); span != nil {
 		id = span.SpanContext().TraceID.String()
