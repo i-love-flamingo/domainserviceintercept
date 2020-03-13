@@ -62,7 +62,7 @@ DomainServiceIntercept
 | <a href="/?setconfig=1">Config</a>
 | <a href="/?vars=1">Vars</a>
 | <a href="/?scenarios=show">Scenarios</a>
-<br/>`)
+<hr/>`)
 }
 
 func clear(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +84,8 @@ func setconfig(w http.ResponseWriter, r *http.Request) {
 	b, _ := yaml.Marshal(patchconfig)
 	fmt.Fprintf(w, `
 <form action="?setconfig=1" method="post">
-<button type="submit">Set config</button><br/>
+<br/>
+<button type="submit">Save config</button><br/>
 <textarea name="config" style="visibility: hidden;" id="configta">%s</textarea>
 </form>
 <div id="config" style="height: 600px; width: 1000px; position: absolute;">%s</div>`, string(b), string(b))
@@ -159,7 +160,10 @@ func scenarios(w http.ResponseWriter, r *http.Request) {
 		files, _ := ioutil.ReadDir("dsi")
 		preresponse(w)
 		for _, file := range files {
-			fmt.Fprintf(w, `<hr/><a href="?scenarios=%s">%s</a><br/>`, file.Name(), file.Name())
+			fmt.Fprintf(w, `<a href="#%s">%s</a><br/>`, file.Name(), file.Name())
+		}
+		for _, file := range files {
+			fmt.Fprintf(w, `<hr/><a name="%s"/><strong>%s:</strong><br/><a href="?scenarios=%s">Load Scenario</a> | <a href="?scenarios=%s&add=1">Add Scenario to current config</a><br/>`, file.Name(), file.Name(), file.Name(), file.Name())
 			content, _ := ioutil.ReadFile(filepath.Clean("dsi/" + file.Name()))
 			fmt.Fprintf(w, `<div style="border: solid 1px #666;"><div class="preview" style="height: 150px; width: 1000px; font-size: 8pt;">%s</div></div>`, strings.TrimSpace(string(content)))
 		}
@@ -181,7 +185,13 @@ func scenarios(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filename := filepath.Clean("/" + r.URL.Query().Get("scenarios"))
-	loadFile("dsi" + filename)
+	if r.URL.Query().Get("add") == "1" {
+		old := patchconfig
+		loadFile("dsi" + filename)
+		patchconfig = append(old, patchconfig...)
+	} else {
+		loadFile("dsi" + filename)
+	}
 
 	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 }
