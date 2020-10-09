@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"flamingo.me/dingo"
@@ -11,11 +12,15 @@ import (
 	"go.opencensus.io/trace"
 )
 
+var once = new(sync.Once)
+
 // Register DSI for current injector
 func Register(injector *dingo.Injector) {
-	go Traceserver()
-	injector.BindInterceptor(new(flamingo.Logger), PdsiLogger{})
-	http.DefaultTransport = &roundtripper{upstream: http.DefaultTransport}
+	once.Do(func() {
+		go Traceserver()
+		injector.BindInterceptor(new(flamingo.Logger), PdsiLogger{})
+		http.DefaultTransport = &roundtripper{upstream: http.DefaultTransport}
+	})
 }
 
 type roundtripper struct {
