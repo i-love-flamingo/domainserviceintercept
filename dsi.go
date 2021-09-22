@@ -408,6 +408,8 @@ func loadYaml(b []byte, addToExistingCfg bool) {
 
 	if addToExistingCfg {
 		patchconfig = append(patchconfig, newCfg...)
+	} else {
+		patchconfig = newCfg
 	}
 
 	statevars = new(sync.Map)
