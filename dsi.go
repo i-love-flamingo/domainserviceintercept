@@ -69,14 +69,13 @@ func clear(w http.ResponseWriter, r *http.Request) {
 	traceMutex.Lock()
 	traces = nil
 	traceMutex.Unlock()
-	loadYaml([]byte(`[]`), false, false)
-	loadDefaultConfig()
+	loadYaml([]byte(`[]`),false)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func setconfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
-		loadYaml([]byte(r.FormValue("config")), false, false)
+		loadYaml([]byte(r.FormValue("config")),false)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
@@ -187,9 +186,9 @@ func scenarios(w http.ResponseWriter, r *http.Request) {
 
 	filename := filepath.Clean("/" + r.URL.Query().Get("scenarios"))
 	if r.URL.Query().Get("add") == "1" {
-		LoadFile("dsi"+filename, true, false)
+		LoadFile("dsi"+filename, true)
 	} else {
-		LoadFile("dsi"+filename, false, false)
+		LoadFile("dsi"+filename, false)
 	}
 
 	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
@@ -397,30 +396,21 @@ type patch struct {
 }
 
 var patchconfig []*patch
-var persistentConfig []*patch
 
-func LoadFile(filename string, addToExistingCfg bool, persistent bool) {
+func LoadFile(filename string, addToExistingCfg bool) {
 	b, _ := ioutil.ReadFile(filename)
-	loadYaml(b, addToExistingCfg, persistent)
+	loadYaml(b, addToExistingCfg)
 }
 
-func loadYaml(b []byte, addToExistingCfg bool, persistent bool) {
+func loadYaml(b []byte, addToExistingCfg bool) {
 	newCfg := patchconfig
 	yaml.Unmarshal(b, &newCfg)
 
-	if persistent {
-		persistentConfig = append(newCfg, persistentConfig...)
-	}
-
 	if addToExistingCfg {
-		patchconfig = append(newCfg, patchconfig...)
+		patchconfig = append(patchconfig, newCfg...)
 	} else {
 		patchconfig = newCfg
 	}
 
 	statevars = new(sync.Map)
-}
-
-func loadDefaultConfig() {
-	patchconfig = append(persistentConfig, patchconfig...)
 }
