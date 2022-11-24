@@ -90,7 +90,7 @@ func setconfig(w http.ResponseWriter, r *http.Request) {
 </form>
 <div id="config" style="height: 600px; width: 1000px; position: absolute;">%s</div>`, string(b), string(b))
 	fmt.Fprintf(w, `
-<script src="https://pagecdn.io/lib/ace/1.4.5/ace.js" type="text/javascript" charset="utf-8"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.5/ace.js" type="text/javascript" charset="utf-8"></script>
 <script>
 	var editor = ace.edit("config");
 	editor.setTheme("ace/theme/monokai");
