@@ -12,17 +12,17 @@ func Test_Traceme(t *testing.T) {
 		{
 			What:   "test",
 			Match:  "1",
-			Return: true,
+			Return: map[string]interface{}{"res": true},
 		},
 		{
 			What:  "test2",
 			Match: "1",
-			Patch: true,
+			Patch: map[string]interface{}{"res": true},
 		},
 		{
 			What:   "test3",
 			Match:  "1",
-			Patch:  true,
+			Patch:  map[string]interface{}{"res": true},
 			Repeat: 3,
 		},
 	}
@@ -31,7 +31,7 @@ func Test_Traceme(t *testing.T) {
 
 	res, called = false, false
 	p := 1
-	Traceme(context.Background(), "test", map[string]interface{}{"a": &p}, func() { called = true }, &res)
+	Traceme(context.Background(), "test", A{"a": &p}, func() { called = true }, A{"res": &res}, A{})
 	if !res {
 		t.Errorf("res was not set to true")
 	}
@@ -40,7 +40,7 @@ func Test_Traceme(t *testing.T) {
 	}
 
 	res, called = false, false
-	Traceme(context.Background(), "test2", map[string]interface{}{}, func() { called = true }, &res)
+	Traceme(context.Background(), "test2", A{}, func() { called = true }, A{"res": &res}, A{})
 	if !res {
 		t.Errorf("res was not set to true")
 	}
@@ -49,11 +49,11 @@ func Test_Traceme(t *testing.T) {
 	}
 
 	t.Run("repeats", func(t *testing.T) {
-		Traceme(context.Background(), "test3", map[string]interface{}{}, func() { called = true }, &res)
-		Traceme(context.Background(), "test3", map[string]interface{}{}, func() { called = true }, &res)
+		Traceme(context.Background(), "test3", A{}, func() { called = true }, A{"res": &res}, A{})
+		Traceme(context.Background(), "test3", A{}, func() { called = true }, A{"res": &res}, A{})
 
 		res, called = false, false
-		Traceme(context.Background(), "test3", map[string]interface{}{}, func() { called = true }, &res)
+		Traceme(context.Background(), "test3", A{}, func() { called = true }, A{"res": &res}, A{})
 		if !res {
 			t.Errorf("res was not set to true")
 		}
@@ -62,7 +62,7 @@ func Test_Traceme(t *testing.T) {
 		}
 
 		res, called = false, false
-		Traceme(context.Background(), "test3", map[string]interface{}{}, func() { called = true }, &res)
+		Traceme(context.Background(), "test3", A{}, func() { called = true }, A{"res": &res}, A{})
 		if res {
 			t.Errorf("res should not be patched again")
 		}
