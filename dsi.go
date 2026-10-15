@@ -168,7 +168,7 @@ func scenarios(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, `<div style="border: solid 1px #666;"><div class="preview" style="height: 150px; width: 1000px; font-size: 8pt;">%s</div></div>`, strings.TrimSpace(string(content)))
 		}
 		fmt.Fprintf(w, `
-<script src="https://pagecdn.io/lib/ace/1.4.5/ace.js" type="text/javascript" charset="utf-8"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.5/ace.js" type="text/javascript" charset="utf-8"></script>
 <script>
 	for (el of document.getElementsByClassName("preview")) {
 		var editor = ace.edit(el);
