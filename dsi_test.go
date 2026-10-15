@@ -2,6 +2,8 @@ package dsi
 
 import (
 	"context"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -68,4 +70,17 @@ func Test_Traceme(t *testing.T) {
 			t.Errorf("after repetition should call")
 		}
 	})
+}
+
+func Test_Scenarios_CDN(t *testing.T) {
+	req := httptest.NewRequest("GET", "/?scenarios=show", nil)
+	rec := httptest.NewRecorder()
+	scenarios(rec, req)
+	body := rec.Body.String()
+	if strings.Contains(body, "pagecdn.io") {
+		t.Errorf("scenarios response contains unsafe pagecdn.io CDN link")
+	}
+	if !strings.Contains(body, "https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.5/ace.js") {
+		t.Errorf("scenarios response does not contain cloudflare ace.js CDN link")
+	}
 }
